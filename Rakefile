@@ -30,8 +30,9 @@ namespace :odgi do
   desc 'Building odgi'
   task :build do
     jemalloc_lib_dir = File.expand_path('jemalloc/lib', __dir__)
+    jemalloc_lib_file = File.join(jemalloc_lib_dir, 'libjemalloc.a')
     Dir.chdir('odgi') do
-      sh "cmake -H. -Bbuild -DJEMALLOC_LIBRARY=#{jemalloc_lib_dir}"
+      sh "cmake -H. -Bbuild -DJEMALLOC_LIBRARY=#{jemalloc_lib_file}"
       sh "cmake --build build -- -j #{Etc.nprocessors}"
     end
   end
