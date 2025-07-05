@@ -52,4 +52,8 @@ end
 
 find_library('odgi', nil, odgi_library_dir)
 
+# Link custom jemalloc built with --disable-initial-exec-tls
+jemalloc_lib_dir = File.expand_path('../../jemalloc/lib', __dir__)
+$LDFLAGS << " -L#{jemalloc_lib_dir} -ljemalloc -Wl,-rpath,#{jemalloc_lib_dir}"
+
 create_makefile('odgi/odgi')

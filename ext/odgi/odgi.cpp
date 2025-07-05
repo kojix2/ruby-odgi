@@ -7,12 +7,11 @@
 
 using namespace Rice;
 
-// odgi load graph
-// Object rb_odgi_load_graph(Object self, Object filen)
-// {
-//     odgi::graph_t graph = odgi::load_graph(detail::from_ruby<std::string>(filen));
-
-// }
+// Wrapper to convert const shared_ptr to non-const for Rice compatibility
+ograph_t odgi_load_graph_wrapper(const char *filename) {
+    const ograph_t const_graph = odgi_load_graph(filename);
+    return ograph_t(const_graph);
+}
 
 extern "C" void Init_odgi()
 {
@@ -121,7 +120,7 @@ extern "C" void Init_odgi()
         .define_singleton_function("odgi_long_long_size", &odgi_long_long_size)
         .define_singleton_function("odgi_handle_i_size", &odgi_handle_i_size)
         .define_singleton_function("odgi_step_handle_i_size", &odgi_step_handle_i_size)
-        .define_singleton_function("odgi_load_graph", &odgi_load_graph)
+        .define_singleton_function("odgi_load_graph", &odgi_load_graph_wrapper)
         .define_singleton_function("odgi_free_graph", &odgi_free_graph)
         .define_singleton_function("odgi_get_node_count", &odgi_get_node_count)
         .define_singleton_function("odgi_max_node_id", &odgi_max_node_id)
