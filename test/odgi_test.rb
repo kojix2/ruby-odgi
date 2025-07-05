@@ -15,7 +15,7 @@ class OdgiTest < Test::Unit::TestCase
     )
     assert_kind_of ODGI::Graph, graph
   end
-  
+
   def setup
     @graph = ODGI::FFI.odgi_load_graph(
       File.join(File.dirname(__dir__), 'odgi', 'test', 'DRB1-3123_sorted.og')
