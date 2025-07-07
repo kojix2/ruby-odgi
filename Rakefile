@@ -9,26 +9,45 @@ end
 
 require 'rake/extensiontask'
 
-task build: :compile
-
-Rake::ExtensionTask.new('odgi') do |ext|
-  ext.lib_dir = 'lib/odgi'
-end
+# Vendor directory setup
+VENDOR_DIR = File.expand_path('vendor', __dir__)
+VENDOR_LIB_DIR = File.join(VENDOR_DIR, 'lib')
 
 jemalloc_shared_lib_ext = RUBY_PLATFORM =~ /darwin/ ? 'dylib' : 'so'
-jemalloc_lib = File.expand_path("jemalloc/lib/libjemalloc.#{jemalloc_shared_lib_ext}", __dir__)
+File.expand_path("jemalloc/lib/libjemalloc.#{jemalloc_shared_lib_ext}", __dir__)
+jemalloc_vendor_lib = File.join(VENDOR_LIB_DIR, "libjemalloc.#{jemalloc_shared_lib_ext}")
 
-file jemalloc_lib do
+# Build jemalloc and move to vendor
+file jemalloc_vendor_lib do
+  # Ensure vendor directory exists
+  FileUtils.mkdir_p(VENDOR_LIB_DIR)
+
+  # Build jemalloc
   Dir.chdir('jemalloc') do
     sh './autogen.sh'
     sh 'CFLAGS="-fPIC" ./configure --disable-initial-exec-tls'
     sh "make -j #{Etc.nprocessors}"
   end
+
+  # Copy jemalloc files to vendor directory
+  jemalloc_lib_dir = File.expand_path('jemalloc/lib', __dir__)
+
+  # Copy the actual library file (libjemalloc.so.2)
+  actual_lib = File.join(jemalloc_lib_dir, "libjemalloc.#{jemalloc_shared_lib_ext}.2")
+  vendor_actual_lib = File.join(VENDOR_LIB_DIR, "libjemalloc.#{jemalloc_shared_lib_ext}.2")
+  FileUtils.cp(actual_lib, vendor_actual_lib)
+
+  # Create symlinks in vendor directory
+  Dir.chdir(VENDOR_LIB_DIR) do
+    FileUtils.ln_sf("libjemalloc.#{jemalloc_shared_lib_ext}.2", "libjemalloc.#{jemalloc_shared_lib_ext}")
+  end
+
+  puts "Moved jemalloc library to vendor: #{jemalloc_vendor_lib}"
 end
 
 namespace :jemalloc do
-  desc 'Build jemalloc if needed'
-  task build: jemalloc_lib
+  desc 'Build jemalloc and move to vendor'
+  task build: jemalloc_vendor_lib
 end
 
 def find_cmake_files
@@ -104,27 +123,31 @@ def restore_sdsl_lite
   end
 end
 
-# Define odgi shared library as a file task (platform-specific extension)
+# Define odgi shared library paths
 shared_lib_ext = RUBY_PLATFORM =~ /darwin/ ? 'dylib' : 'so'
-odgi_shared_lib = File.expand_path("odgi/lib/libodgi.#{shared_lib_ext}", __dir__)
+odgi_source_lib = File.expand_path("odgi/lib/libodgi.#{shared_lib_ext}", __dir__)
+odgi_vendor_lib = File.join(VENDOR_LIB_DIR, "libodgi.#{shared_lib_ext}")
 
-file odgi_shared_lib => [jemalloc_lib] do
+# Build odgi using vendor jemalloc and move to vendor
+file odgi_vendor_lib => [jemalloc_vendor_lib] do
   patch_cmake_versions
 
-  jemalloc_root_dir = File.expand_path('jemalloc', __dir__)
-  jemalloc_lib_dir = File.join(jemalloc_root_dir, 'lib')
-  jemalloc_include_dir = File.join(jemalloc_root_dir, 'include')
-
-  linker_flags = "-L#{jemalloc_lib_dir}"
+  # Use vendor jemalloc
+  jemalloc_include_dir = File.expand_path('jemalloc/include', __dir__)
+  jemalloc_lib_file = jemalloc_vendor_lib
 
   Dir.chdir('odgi') do
-    sh "cmake -H. -Bbuild -DCMAKE_EXE_LINKER_FLAGS='#{linker_flags}' -DCMAKE_SHARED_LINKER_FLAGS='#{linker_flags}' -DCMAKE_CXX_FLAGS='-I#{jemalloc_include_dir}'"
+    sh "cmake -H. -Bbuild -DJEMALLOC_LIBRARY=#{jemalloc_lib_file} -DJEMALLOC_INCLUDE_DIR=#{jemalloc_include_dir}"
 
     # Apply sdsl-lite patch before build
     patch_sdsl_lite
 
     sh "cmake --build build -- -j #{Etc.nprocessors}"
   end
+
+  # Move to vendor directory
+  FileUtils.cp(odgi_source_lib, odgi_vendor_lib)
+  puts "Moved odgi library to vendor: #{odgi_vendor_lib}"
 end
 
 namespace :odgi do
@@ -144,9 +167,31 @@ namespace :odgi do
     restore_sdsl_lite
   end
 
-  desc 'Building odgi'
-  task build: odgi_shared_lib
+  desc 'Build odgi using vendor jemalloc and move to vendor'
+  task build: odgi_vendor_lib
 end
 
-task compile: 'odgi:build'
+# Vendor tasks
+namespace :vendor do
+  desc 'Clean vendor directory'
+  task :clean do
+    if Dir.exist?(VENDOR_DIR)
+      FileUtils.rm_rf(VENDOR_DIR)
+      puts "Cleaned vendor directory: #{VENDOR_DIR}"
+    end
+  end
+end
+
+# Modify the extension task to use vendor libraries
+Rake::ExtensionTask.new('odgi') do |ext|
+  ext.lib_dir = 'lib/odgi'
+
+  # Configure to use vendor libraries
+  ext.config_options << "--with-odgi-lib=#{VENDOR_LIB_DIR}"
+  ext.config_options << "--with-jemalloc-lib=#{VENDOR_LIB_DIR}"
+end
+
+# Update compile task to depend on vendor libraries
+task compile: [odgi_vendor_lib, jemalloc_vendor_lib]
+task build: :compile
 task test: :compile

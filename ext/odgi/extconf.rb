@@ -3,7 +3,19 @@
 require 'mkmf-rice'
 
 ODGI_DIR = Pathname(__dir__) / '../../odgi'
-odgi_library_dir = (ODGI_DIR / 'lib').to_s
+VENDOR_DIR = Pathname(__dir__) / '../../vendor'
+VENDOR_LIB_DIR = VENDOR_DIR / 'lib'
+
+# Use vendor libraries if available, otherwise fall back to original locations
+if VENDOR_LIB_DIR.exist?
+  odgi_library_dir = VENDOR_LIB_DIR.to_s
+  jemalloc_lib_dir = VENDOR_LIB_DIR.to_s
+  puts "Using vendor libraries from: #{VENDOR_LIB_DIR}"
+else
+  odgi_library_dir = (ODGI_DIR / 'lib').to_s
+  jemalloc_lib_dir = File.expand_path('../../jemalloc/lib', __dir__)
+  puts 'Using original library locations'
+end
 
 # if macOS
 if RUBY_PLATFORM =~ /darwin/
@@ -66,10 +78,19 @@ end
 # Check for odgi-api.h in the gem's odgi/src directory
 find_header 'odgi-api.h', (ODGI_DIR / 'src').to_s
 
-find_library('odgi', nil, odgi_library_dir)
-
 # Link custom jemalloc built with --disable-initial-exec-tls
-jemalloc_lib_dir = File.expand_path('../../jemalloc/lib', __dir__)
-$LDFLAGS << " -L#{jemalloc_lib_dir} -ljemalloc -Wl,-rpath,#{jemalloc_lib_dir}"
+# Set rpath to prioritize vendor libraries and use absolute paths
+if VENDOR_LIB_DIR.exist?
+  # Use absolute paths to force linking to vendor libraries
+  jemalloc_lib_path = File.join(jemalloc_lib_dir, 'libjemalloc.so')
+  odgi_lib_path = File.join(odgi_library_dir, 'libodgi.so')
+
+  $LDFLAGS << " #{jemalloc_lib_path} #{odgi_lib_path}"
+  $LDFLAGS << " -Wl,-rpath,#{jemalloc_lib_dir}:#{odgi_library_dir}"
+else
+  $LDFLAGS << " -L#{jemalloc_lib_dir} -ljemalloc"
+  $LDFLAGS << " -Wl,-rpath,#{jemalloc_lib_dir}:#{odgi_library_dir}"
+  find_library('odgi', nil, odgi_library_dir)
+end
 
 create_makefile('odgi/odgi')

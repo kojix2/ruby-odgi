@@ -13,7 +13,6 @@ Gem::Specification.new do |spec|
   spec.homepage = 'https://github.com/kojix2/ruby-odgi'
   spec.license = 'MIT'
 
-  shared_lib_ext = RUBY_PLATFORM =~ /darwin/ ? 'dylib' : 'so'
   spec.files = Dir[
     '{ext,vendor}/**/*',
     'lib/**/*.rb',
@@ -26,12 +25,10 @@ Gem::Specification.new do |spec|
     'odgi/deps/flat_hash_map/**/*.hpp',
     'odgi/deps/atomicbitvector/include/**/*.hpp',
     'odgi/deps/atomicbitvector/include/**/*.h',
-    "odgi/lib/libodgi.#{shared_lib_ext}",
-    "jemalloc/lib/libjemalloc.#{shared_lib_ext}.2",
     'jemalloc/include/jemalloc/**/*.h',
-    'LICENSE.txt',
+    'LICENSE',
     'README.md'
-  ]
+  ].select { |f| File.file?(f) }
   spec.require_paths = ['lib']
   spec.extensions = ['ext/odgi/extconf.rb']
 
