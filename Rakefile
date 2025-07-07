@@ -79,8 +79,9 @@ def patch_sdsl_lite
     next if File.exist?(orig)  # Already patched
     
     content = File.read(file)
-    patched = content.gsub(/tree\.m_select1(?!\w)/, 'tree.m_bv_select1')
-                    .gsub(/tree\.m_select0(?!\w)/, 'tree.m_bv_select0')
+    # Fix the specific lines in swap function
+    patched = content.gsub(/util::swap_support\(m_bv_select1, tree\.m_select1,/, 'util::swap_support(m_bv_select1, tree.m_bv_select1,')
+                    .gsub(/util::swap_support\(m_bv_select0, tree\.m_select0,/, 'util::swap_support(m_bv_select0, tree.m_bv_select0,')
     
     if content != patched
       File.write(orig, content)  # Backup original
