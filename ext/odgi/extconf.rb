@@ -12,6 +12,23 @@ if RUBY_PLATFORM =~ /darwin/
   end
 end
 
+# Add all necessary include directories
+include_dirs = [
+  ODGI_DIR / 'deps/libhandlegraph/src/include',
+  ODGI_DIR / 'deps/hopscotch-map/include',
+  ODGI_DIR / 'deps/DYNAMIC/include',
+  ODGI_DIR / 'deps/sparsepp/sparsepp',
+  ODGI_DIR / 'deps/flat_hash_map',
+  ODGI_DIR / 'deps/atomicbitvector/include',
+  ODGI_DIR / 'src'
+]
+
+include_dirs.each do |dir|
+  dir_s = dir.to_s
+  $INCFLAGS << " -I#{dir_s}"
+end
+
+# Verify headers exist
 (ODGI_DIR / 'deps/libhandlegraph/src/include').tap do |dir|
   find_header 'handlegraph/types.hpp', dir
   find_header 'handlegraph/iteratee.hpp', dir
@@ -46,9 +63,8 @@ end
   find_header 'atomic_bitvector.hpp', dir
 end
 
-(ODGI_DIR / 'src').tap do |dir|
-  find_header 'odgi-api.h', dir
-end
+# Check for odgi-api.h in the gem's odgi/src directory
+find_header 'odgi-api.h', (ODGI_DIR / 'src').to_s
 
 find_library('odgi', nil, odgi_library_dir)
 
