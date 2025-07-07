@@ -87,6 +87,35 @@ def restore_cmake_versions
   end
 end
 
+def patch_cmake_jemalloc
+  cmake_file = 'odgi/CMakeLists.txt'
+  return unless File.exist?(cmake_file)
+
+  jemalloc_backup = "#{cmake_file}.jemalloc_backup"
+  return if File.exist?(jemalloc_backup)
+
+  content = File.read(cmake_file)
+  
+  # Remove or comment out the JEMALLOC_LINK_LIBRARIES setting
+  patched = content.gsub(/^(\s*set\s*\(\s*JEMALLOC_LINK_LIBRARIES\s+"jemalloc"\s*\))/, '# \1 # Patched by Rakefile')
+  
+  if content != patched
+    File.write(jemalloc_backup, content)
+    File.write(cmake_file, patched)
+    puts "Patched jemalloc linking in: #{cmake_file}"
+  end
+end
+
+def restore_cmake_jemalloc
+  cmake_file = 'odgi/CMakeLists.txt'
+  jemalloc_backup = "#{cmake_file}.jemalloc_backup"
+  return unless File.exist?(jemalloc_backup)
+
+  File.write(cmake_file, File.read(jemalloc_backup))
+  File.delete(jemalloc_backup)
+  puts "Restored jemalloc linking in: #{cmake_file}"
+end
+
 def patch_sdsl_lite
   # Patch louds_tree.hpp after sdsl-lite build
   louds_tree_files = Dir.glob('odgi/build/sdsl-lite-prefix/src/sdsl-lite*/include/sdsl/louds_tree.hpp')
@@ -131,6 +160,7 @@ odgi_vendor_lib = File.join(VENDOR_LIB_DIR, "libodgi.#{shared_lib_ext}")
 # Build odgi using vendor jemalloc and move to vendor
 file odgi_vendor_lib => [jemalloc_vendor_lib] do
   patch_cmake_versions
+  patch_cmake_jemalloc
 
   # Use vendor jemalloc
   jemalloc_include_dir = File.expand_path('jemalloc/include', __dir__)
@@ -161,6 +191,14 @@ namespace :odgi do
     restore_cmake_versions
   end
 
+  task :patch_jemalloc do
+    patch_cmake_jemalloc
+  end
+
+  task :restore_jemalloc do
+    restore_cmake_jemalloc
+  end
+
   task :patch_sdsl do
     patch_sdsl_lite
   end
@@ -177,6 +215,11 @@ end
 namespace :vendor do
   desc 'Clean vendor directory'
   task :clean do
+    # Restore patches before cleaning
+    restore_cmake_versions
+    restore_cmake_jemalloc
+    restore_sdsl_lite
+    
     if Dir.exist?(VENDOR_DIR)
       FileUtils.rm_rf(VENDOR_DIR)
       puts "Cleaned vendor directory: #{VENDOR_DIR}"
