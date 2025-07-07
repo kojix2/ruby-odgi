@@ -137,7 +137,9 @@ file odgi_vendor_lib => [jemalloc_vendor_lib] do
   jemalloc_lib_file = jemalloc_vendor_lib
 
   Dir.chdir('odgi') do
-    sh "cmake -H. -Bbuild -DJEMALLOC_LIBRARY=#{jemalloc_lib_file} -DJEMALLOC_INCLUDE_DIR=#{jemalloc_include_dir}"
+    # Set rpath to use $ORIGIN for relative path resolution and override JEMALLOC_LINK_LIBRARIES
+    rpath_setting = "'$ORIGIN'"
+    sh "cmake -H. -Bbuild -DJEMALLOC_LIBRARY=#{jemalloc_lib_file} -DJEMALLOC_INCLUDE_DIR=#{jemalloc_include_dir} -DJEMALLOC_LINK_LIBRARIES=#{jemalloc_lib_file} -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH=#{rpath_setting} -DCMAKE_BUILD_RPATH=#{rpath_setting}"
 
     # Apply sdsl-lite patch before build
     patch_sdsl_lite
