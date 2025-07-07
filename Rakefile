@@ -68,6 +68,41 @@ def restore_cmake_versions
   end
 end
 
+def patch_sdsl_lite
+  # Patch louds_tree.hpp after sdsl-lite build
+  louds_tree_files = Dir.glob('odgi/build/sdsl-lite-prefix/src/sdsl-lite*/include/sdsl/louds_tree.hpp')
+  
+  louds_tree_files.each do |file|
+    next unless File.exist?(file)
+    
+    orig = "#{file}.orig"
+    next if File.exist?(orig)  # Already patched
+    
+    content = File.read(file)
+    patched = content.gsub(/tree\.m_select1(?!\w)/, 'tree.m_bv_select1')
+                    .gsub(/tree\.m_select0(?!\w)/, 'tree.m_bv_select0')
+    
+    if content != patched
+      File.write(orig, content)  # Backup original
+      File.write(file, patched)
+      puts "Patched sdsl-lite: #{file}"
+    end
+  end
+end
+
+def restore_sdsl_lite
+  louds_tree_files = Dir.glob('odgi/build/sdsl-lite-prefix/src/sdsl-lite*/include/sdsl/louds_tree.hpp')
+  
+  louds_tree_files.each do |file|
+    orig = "#{file}.orig"
+    next unless File.exist?(orig)
+    
+    File.write(file, File.read(orig))
+    File.delete(orig)
+    puts "Restored sdsl-lite: #{file}"
+  end
+end
+
 # Define odgi shared library as a file task (platform-specific extension)
 shared_lib_ext = RUBY_PLATFORM =~ /darwin/ ? 'dylib' : 'so'
 odgi_shared_lib = File.expand_path("odgi/lib/libodgi.#{shared_lib_ext}", __dir__)
@@ -83,6 +118,10 @@ file odgi_shared_lib => [jemalloc_lib] do
 
   Dir.chdir('odgi') do
     sh "cmake -H. -Bbuild -DJEMALLOC_LIBRARY=#{jemalloc_lib_file} -DJEMALLOC_INCLUDE_DIR=#{jemalloc_include_dir}"
+    
+    # Apply sdsl-lite patch before build
+    patch_sdsl_lite
+    
     sh "cmake --build build -- -j #{Etc.nprocessors}"
   end
 end
@@ -94,6 +133,14 @@ namespace :odgi do
 
   task :restore_cmake do
     restore_cmake_versions
+  end
+
+  task :patch_sdsl do
+    patch_sdsl_lite
+  end
+
+  task :restore_sdsl do
+    restore_sdsl_lite
   end
 
   desc 'Building odgi'

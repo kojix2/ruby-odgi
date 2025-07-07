@@ -1,35 +1,65 @@
-name: test
+name: CI
+
 on: [push, pull_request]
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: 1
+
 jobs:
-  build:
+  test:
     name: ${{ matrix.os }} Ruby ${{ matrix.ruby }}
     runs-on: ${{ matrix.os }}-latest
+
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu", "macos"]
+        os: [ubuntu, macos]
         ruby: ["3.4"]
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: ruby/setup-ruby@v1
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
-      - if: matrix.os == 'macos'
-        run: brew update && brew install llvm libomp autoconf #jemalloc
-      - if: matrix.os == 'ubuntu'
-        run: bundle exec rake jemalloc:build && bundle exec rake odgi:build
-      - if: matrix.os == 'macos'
+
+      - name: Install macOS dependencies
+        if: matrix.os == 'macos'
+        run: brew install llvm libomp autoconf
+
+      - name: Setup build environment (macOS)
+        if: matrix.os == 'macos'
         run: |
-          CC=$(brew --prefix llvm)/bin/clang CXX=$(brew --prefix llvm)/bin/clang++ LDFLAGS=-L/opt/homebrew/lib bundle exec rake jemalloc:build
-          CC=$(brew --prefix llvm)/bin/clang CXX=$(brew --prefix llvm)/bin/clang++ LDFLAGS=-L/opt/homebrew/lib bundle exec rake odgi:build
-      - run: bundle exec rake compile
-      - if: matrix.os == 'macos'
+          echo "CC=$(brew --prefix llvm)/bin/clang" >> $GITHUB_ENV
+          echo "CXX=$(brew --prefix llvm)/bin/clang++" >> $GITHUB_ENV
+          echo "LDFLAGS=-L/opt/homebrew/lib" >> $GITHUB_ENV
+
+      - name: Build jemalloc
+        run: bundle exec rake jemalloc:build
+
+      - name: Build odgi
+        run: bundle exec rake odgi:build
+
+      - name: Compile Ruby extension
+        run: bundle exec rake compile
+
+      - name: Fix macOS library paths
+        if: matrix.os == 'macos'
         run: |
+          echo "Checking library dependencies..."
           otool -L lib/odgi/odgi.bundle
           otool -L odgi/lib/libodgi.dylib
-          install_name_tool -change "@rpath/libodgi.dylib" $(pwd)/odgi/lib/libodgi.dylib lib/odgi/odgi.bundle # FIXME: this is a hack
+
+          echo "Fixing library paths..."
+          install_name_tool -change "@rpath/libodgi.dylib" "$(pwd)/odgi/lib/libodgi.dylib" lib/odgi/odgi.bundle
+
+          echo "Verifying fixed paths..."
           otool -L lib/odgi/odgi.bundle
-      - run: bundle exec rake test
+
+      - name: Run tests
+        run: bundle exec rake test
