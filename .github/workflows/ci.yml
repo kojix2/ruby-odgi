@@ -43,7 +43,7 @@ jobs:
         run: bundle exec rake jemalloc:build
 
       - name: List jemalloc libraries
-        run: ls -lh jemalloc/lib
+        run: ls -lh vendor/lib
 
       - name: Build odgi
         run: bundle exec rake odgi:build
