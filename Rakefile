@@ -20,7 +20,7 @@ jemalloc_lib = File.expand_path('jemalloc/lib/libjemalloc.a', __dir__)
 file jemalloc_lib do
   Dir.chdir('jemalloc') do
     sh './autogen.sh'
-    sh './configure --disable-initial-exec-tls --with-pic'
+    sh 'CFLAGS="-fPIC" ./configure --disable-initial-exec-tls'
     sh "make -j #{Etc.nprocessors}"
   end
 end
@@ -44,7 +44,7 @@ def patch_cmake_static_jemalloc
   return unless File.file?(file)
 
   orig = "#{file}.orig"
-  return if File.exist?(orig)
+  orig = nil if File.exist?(orig)
 
   content = File.read(file)
 
@@ -56,7 +56,7 @@ def patch_cmake_static_jemalloc
   return if content.include?('add_library(jemalloc STATIC IMPORTED)')
 
   content = jemalloc_declaration + "\n" + content
-  File.write(orig, File.read(file))
+  File.write(orig, File.read(file)) if orig
   File.write(file, content)
   puts "Inserted static jemalloc declaration into: #{file}"
 end
