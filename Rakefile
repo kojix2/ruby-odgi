@@ -71,33 +71,33 @@ end
 def patch_sdsl_lite
   # Patch louds_tree.hpp after sdsl-lite build
   louds_tree_files = Dir.glob('odgi/build/sdsl-lite-prefix/src/sdsl-lite*/include/sdsl/louds_tree.hpp')
-  
+
   louds_tree_files.each do |file|
     next unless File.exist?(file)
-    
+
     orig = "#{file}.orig"
-    next if File.exist?(orig)  # Already patched
-    
+    next if File.exist?(orig) # Already patched
+
     content = File.read(file)
     # Fix the specific lines in swap function
     patched = content.gsub(/util::swap_support\(m_bv_select1, tree\.m_select1,/, 'util::swap_support(m_bv_select1, tree.m_bv_select1,')
-                    .gsub(/util::swap_support\(m_bv_select0, tree\.m_select0,/, 'util::swap_support(m_bv_select0, tree.m_bv_select0,')
-    
-    if content != patched
-      File.write(orig, content)  # Backup original
-      File.write(file, patched)
-      puts "Patched sdsl-lite: #{file}"
-    end
+                     .gsub(/util::swap_support\(m_bv_select0, tree\.m_select0,/, 'util::swap_support(m_bv_select0, tree.m_bv_select0,')
+
+    next unless content != patched
+
+    File.write(orig, content) # Backup original
+    File.write(file, patched)
+    puts "Patched sdsl-lite: #{file}"
   end
 end
 
 def restore_sdsl_lite
   louds_tree_files = Dir.glob('odgi/build/sdsl-lite-prefix/src/sdsl-lite*/include/sdsl/louds_tree.hpp')
-  
+
   louds_tree_files.each do |file|
     orig = "#{file}.orig"
     next unless File.exist?(orig)
-    
+
     File.write(file, File.read(orig))
     File.delete(orig)
     puts "Restored sdsl-lite: #{file}"
@@ -113,16 +113,16 @@ file odgi_shared_lib => [jemalloc_lib] do
 
   jemalloc_root_dir = File.expand_path('jemalloc', __dir__)
   jemalloc_lib_dir = File.join(jemalloc_root_dir, 'lib')
-  jemalloc_include_dir = File.join(jemalloc_root_dir, 'include/jemalloc')
-  jemalloc_shared_lib_ext = RUBY_PLATFORM =~ /darwin/ ? 'dylib' : 'so'
-  jemalloc_lib_file = File.join(jemalloc_lib_dir, "libjemalloc.#{jemalloc_shared_lib_ext}")
+  jemalloc_include_dir = File.join(jemalloc_root_dir, 'include')
+
+  linker_flags = "-L#{jemalloc_lib_dir}"
 
   Dir.chdir('odgi') do
-    sh "cmake -H. -Bbuild -DJEMALLOC_LIBRARY=#{jemalloc_lib_file} -DJEMALLOC_INCLUDE_DIR=#{jemalloc_include_dir}"
-    
+    sh "cmake -H. -Bbuild -DCMAKE_EXE_LINKER_FLAGS='#{linker_flags}' -DCMAKE_SHARED_LINKER_FLAGS='#{linker_flags}' -DCMAKE_CXX_FLAGS='-I#{jemalloc_include_dir}'"
+
     # Apply sdsl-lite patch before build
     patch_sdsl_lite
-    
+
     sh "cmake --build build -- -j #{Etc.nprocessors}"
   end
 end
