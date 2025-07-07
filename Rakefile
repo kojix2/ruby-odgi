@@ -15,7 +15,8 @@ Rake::ExtensionTask.new('odgi') do |ext|
   ext.lib_dir = 'lib/odgi'
 end
 
-jemalloc_lib = File.expand_path('jemalloc/lib/libjemalloc.a', __dir__)
+jemalloc_shared_lib_ext = RUBY_PLATFORM =~ /darwin/ ? 'dylib' : 'so'
+jemalloc_lib = File.expand_path("jemalloc/lib/libjemalloc.#{jemalloc_shared_lib_ext}", __dir__)
 
 file jemalloc_lib do
   Dir.chdir('jemalloc') do
@@ -37,28 +38,6 @@ def find_cmake_files
     files << path if path =~ /CMakeLists\.txt$/ || path =~ /\.cmake$/
   end
   files
-end
-
-def patch_cmake_static_jemalloc
-  file = 'odgi/CMakeLists.txt'
-  return unless File.file?(file)
-
-  orig = "#{file}.orig"
-  orig = nil if File.exist?(orig)
-
-  content = File.read(file)
-
-  jemalloc_declaration = <<~CMAKE
-    add_library(jemalloc STATIC IMPORTED)
-    set_target_properties(jemalloc PROPERTIES IMPORTED_LOCATION "${JEMALLOC_LIBRARY}")
-  CMAKE
-
-  return if content.include?('add_library(jemalloc STATIC IMPORTED)')
-
-  content = jemalloc_declaration + "\n" + content
-  File.write(orig, File.read(file)) if orig
-  File.write(file, content)
-  puts "Inserted static jemalloc declaration into: #{file}"
 end
 
 def patch_cmake_versions
@@ -89,6 +68,25 @@ def restore_cmake_versions
   end
 end
 
+# Define odgi shared library as a file task (platform-specific extension)
+shared_lib_ext = RUBY_PLATFORM =~ /darwin/ ? 'dylib' : 'so'
+odgi_shared_lib = File.expand_path("odgi/lib/libodgi.#{shared_lib_ext}", __dir__)
+
+file odgi_shared_lib => [jemalloc_lib] do
+  patch_cmake_versions
+
+  jemalloc_root_dir = File.expand_path('jemalloc', __dir__)
+  jemalloc_lib_dir = File.join(jemalloc_root_dir, 'lib')
+  jemalloc_include_dir = File.join(jemalloc_root_dir, 'include/jemalloc')
+  jemalloc_shared_lib_ext = RUBY_PLATFORM =~ /darwin/ ? 'dylib' : 'so'
+  jemalloc_lib_file = File.join(jemalloc_lib_dir, "libjemalloc.#{jemalloc_shared_lib_ext}")
+
+  Dir.chdir('odgi') do
+    sh "cmake -H. -Bbuild -DJEMALLOC_LIBRARY=#{jemalloc_lib_file} -DJEMALLOC_INCLUDE_DIR=#{jemalloc_include_dir}"
+    sh "cmake --build build -- -j #{Etc.nprocessors}"
+  end
+end
+
 namespace :odgi do
   task :patch_cmake do
     patch_cmake_versions
@@ -98,22 +96,8 @@ namespace :odgi do
     restore_cmake_versions
   end
 
-  task :patch_cmake_static_jemalloc do
-    patch_cmake_static_jemalloc
-  end
-
   desc 'Building odgi'
-  task build: ['jemalloc:build', :patch_cmake, :patch_cmake_static_jemalloc] do
-    jemalloc_root_dir = File.expand_path('jemalloc', __dir__)
-    jemalloc_lib_dir = File.join(jemalloc_root_dir, 'lib')
-    jemalloc_include_dir = File.join(jemalloc_root_dir, 'include/jemalloc')
-    jemalloc_lib_file = File.join(jemalloc_lib_dir, 'libjemalloc.a')
-
-    Dir.chdir('odgi') do
-      sh "cmake -H. -Bbuild -DJEMALLOC_LIBRARY=#{jemalloc_lib_file} -DJEMALLOC_INCLUDE_DIR=#{jemalloc_include_dir}"
-      sh "cmake --build build -- -j #{Etc.nprocessors}"
-    end
-  end
+  task build: odgi_shared_lib
 end
 
 task compile: 'odgi:build'
