@@ -32,14 +32,21 @@ file jemalloc_vendor_lib do
   # Copy jemalloc files to vendor directory
   jemalloc_lib_dir = File.expand_path('jemalloc/lib', __dir__)
 
-  # Copy the actual library file (libjemalloc.so.2)
-  actual_lib = File.join(jemalloc_lib_dir, "libjemalloc.#{jemalloc_shared_lib_ext}.2")
+  # Find jemalloc library file (macOS/Linux)
+  actual_lib = if jemalloc_shared_lib_ext == 'dylib'
+                 Dir[File.join(jemalloc_lib_dir, 'libjemalloc.2.dylib')].first ||
+                   File.join(jemalloc_lib_dir, 'libjemalloc.dylib.2')
+               else
+                 File.join(jemalloc_lib_dir, 'libjemalloc.so.2')
+               end
   vendor_actual_lib = File.join(VENDOR_LIB_DIR, "libjemalloc.#{jemalloc_shared_lib_ext}.2")
   FileUtils.cp(actual_lib, vendor_actual_lib)
 
   # Create symlinks in vendor directory
   Dir.chdir(VENDOR_LIB_DIR) do
     FileUtils.ln_sf("libjemalloc.#{jemalloc_shared_lib_ext}.2", "libjemalloc.#{jemalloc_shared_lib_ext}")
+    # Also create libjemalloc.2.dylib symlink on macOS for compatibility
+    FileUtils.ln_sf('libjemalloc.dylib.2', 'libjemalloc.2.dylib') if jemalloc_shared_lib_ext == 'dylib'
   end
 
   puts "Moved jemalloc library to vendor: #{jemalloc_vendor_lib}"
@@ -95,15 +102,15 @@ def patch_cmake_jemalloc
   return if File.exist?(jemalloc_backup)
 
   content = File.read(cmake_file)
-  
+
   # Remove or comment out the JEMALLOC_LINK_LIBRARIES setting
   patched = content.gsub(/^(\s*set\s*\(\s*JEMALLOC_LINK_LIBRARIES\s+"jemalloc"\s*\))/, '# \1 # Patched by Rakefile')
-  
-  if content != patched
-    File.write(jemalloc_backup, content)
-    File.write(cmake_file, patched)
-    puts "Patched jemalloc linking in: #{cmake_file}"
-  end
+
+  return unless content != patched
+
+  File.write(jemalloc_backup, content)
+  File.write(cmake_file, patched)
+  puts "Patched jemalloc linking in: #{cmake_file}"
 end
 
 def restore_cmake_jemalloc
@@ -119,7 +126,6 @@ end
 def patch_sdsl_lite
   # Patch louds_tree.hpp after sdsl-lite build
   louds_tree_files = Dir.glob('odgi/build/sdsl-lite-prefix/src/sdsl-lite*/include/sdsl/louds_tree.hpp')
-
   louds_tree_files.each do |file|
     next unless File.exist?(file)
 
@@ -130,17 +136,59 @@ def patch_sdsl_lite
     # Fix the specific lines in swap function
     patched = content.gsub(/util::swap_support\(m_bv_select1, tree\.m_select1,/, 'util::swap_support(m_bv_select1, tree.m_bv_select1,')
                      .gsub(/util::swap_support\(m_bv_select0, tree\.m_select0,/, 'util::swap_support(m_bv_select0, tree.m_bv_select0,')
-
     next unless content != patched
 
     File.write(orig, content) # Backup original
     File.write(file, patched)
     puts "Patched sdsl-lite: #{file}"
   end
+
+  # Patch util.hpp to guard process.h include for non-Windows
+  util_hpp_files = Dir.glob('odgi/build/sdsl-lite-prefix/src/sdsl-lite*/include/sdsl/util.hpp')
+  util_hpp_files.each do |file|
+    next unless File.exist?(file)
+
+    orig = "#{file}.orig"
+    next if File.exist?(orig) # Already patched
+
+    content = File.read(file)
+    # Guard #include <process.h> with #ifdef _WIN32 ... #endif
+    patched = content.gsub(/^(\s*)#include\s*<process\.h>\s*$/) do |_match|
+      indent = Regexp.last_match(1) || ''
+      "#{indent}#ifdef _WIN32\n#{indent}#include <process.h>\n#{indent}#endif"
+    end
+    next unless content != patched
+
+    File.write(orig, content) # Backup original
+    File.write(file, patched)
+    puts "Patched process.h include in: #{file}"
+  end
+end
+
+def patch_atomic_queue
+  # Patch atomic_queue.h to fix template argument list issues
+  atomic_queue_file = 'odgi/deps/atomic_queue/include/atomic_queue/atomic_queue.h'
+  return unless File.exist?(atomic_queue_file)
+
+  orig = "#{atomic_queue_file}.orig"
+  return if File.exist?(orig) # Already patched
+
+  content = File.read(atomic_queue_file)
+
+  # Fix template argument list issues for Clang 20+
+  patched = content.gsub(/Base::template do_pop_any\(/, 'Base::template do_pop_any<>(')
+                   .gsub(/Base::template do_push_any\(/, 'Base::template do_push_any<>(')
+
+  return unless content != patched
+
+  File.write(orig, content) # Backup original
+  File.write(atomic_queue_file, patched)
+  puts "Patched atomic_queue: #{atomic_queue_file}"
 end
 
 def restore_sdsl_lite
   louds_tree_files = Dir.glob('odgi/build/sdsl-lite-prefix/src/sdsl-lite*/include/sdsl/louds_tree.hpp')
+  util_hpp_files = Dir.glob('odgi/build/sdsl-lite-prefix/src/sdsl-lite*/include/sdsl/util.hpp')
 
   louds_tree_files.each do |file|
     orig = "#{file}.orig"
@@ -150,6 +198,25 @@ def restore_sdsl_lite
     File.delete(orig)
     puts "Restored sdsl-lite: #{file}"
   end
+
+  util_hpp_files.each do |file|
+    orig = "#{file}.orig"
+    next unless File.exist?(orig)
+
+    File.write(file, File.read(orig))
+    File.delete(orig)
+    puts "Restored sdsl-lite util.hpp: #{file}"
+  end
+end
+
+def restore_atomic_queue
+  atomic_queue_file = 'odgi/deps/atomic_queue/include/atomic_queue/atomic_queue.h'
+  orig = "#{atomic_queue_file}.orig"
+  return unless File.exist?(orig)
+
+  File.write(atomic_queue_file, File.read(orig))
+  File.delete(orig)
+  puts "Restored atomic_queue: #{atomic_queue_file}"
 end
 
 # Define odgi shared library paths
@@ -167,9 +234,15 @@ file odgi_vendor_lib => [jemalloc_vendor_lib] do
   jemalloc_lib_file = jemalloc_vendor_lib
 
   Dir.chdir('odgi') do
+    # Apply atomic_queue patch before build
+    patch_atomic_queue
+
     # Set rpath to use $ORIGIN for relative path resolution and override JEMALLOC_LINK_LIBRARIES
     rpath_setting = "'$ORIGIN'"
-    sh "cmake -H. -Bbuild -DJEMALLOC_LIBRARY=#{jemalloc_lib_file} -DJEMALLOC_INCLUDE_DIR=#{jemalloc_include_dir} -DJEMALLOC_LINK_LIBRARIES=#{jemalloc_lib_file} -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH=#{rpath_setting} -DCMAKE_BUILD_RPATH=#{rpath_setting}"
+    openmp_include = ENV['HOMEBREW_PREFIX'] ? "#{ENV['HOMEBREW_PREFIX']}/opt/libomp/include" : '/opt/homebrew/opt/libomp/include'
+    cmake_cxx_flags = "-I#{openmp_include} -Wno-error=missing-template-arg-list-after-template-kw"
+    cmake_c_flags = "-I#{openmp_include}"
+    sh "cmake -H. -Bbuild -DJEMALLOC_LIBRARY=#{jemalloc_lib_file} -DJEMALLOC_INCLUDE_DIR=#{jemalloc_include_dir} -DJEMALLOC_LINK_LIBRARIES=#{jemalloc_lib_file} -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH=#{rpath_setting} -DCMAKE_BUILD_RPATH=#{rpath_setting} -DCMAKE_CXX_FLAGS='#{cmake_cxx_flags}' -DCMAKE_C_FLAGS='#{cmake_c_flags}'"
 
     # Apply sdsl-lite patch before build
     patch_sdsl_lite
@@ -219,7 +292,8 @@ namespace :vendor do
     restore_cmake_versions
     restore_cmake_jemalloc
     restore_sdsl_lite
-    
+    restore_atomic_queue
+
     if Dir.exist?(VENDOR_DIR)
       FileUtils.rm_rf(VENDOR_DIR)
       puts "Cleaned vendor directory: #{VENDOR_DIR}"
