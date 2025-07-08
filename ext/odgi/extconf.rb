@@ -79,17 +79,26 @@ end
 find_header 'odgi-api.h', (ODGI_DIR / 'src').to_s
 
 # Link custom jemalloc built with --disable-initial-exec-tls
-# Set rpath to prioritize vendor libraries and use absolute paths
+# Set rpath to prioritize vendor libraries and use @rpath for dynamic linking
 if VENDOR_LIB_DIR.exist?
-  # Use absolute paths to force linking to vendor libraries
-  jemalloc_lib_path = File.join(jemalloc_lib_dir, 'libjemalloc.so')
-  odgi_lib_path = File.join(odgi_library_dir, 'libodgi.so')
+  # Use platform-specific library extensions
+  lib_ext = RUBY_PLATFORM =~ /darwin/ ? 'dylib' : 'so'
+  odgi_lib_path = File.join(odgi_library_dir, "libodgi.#{lib_ext}")
 
-  $LDFLAGS << " #{jemalloc_lib_path} #{odgi_lib_path}"
-  $LDFLAGS << " -Wl,-rpath,#{jemalloc_lib_dir}:#{odgi_library_dir}"
+  # Use -L and -l flags with rpath instead of absolute paths
+  $LDFLAGS << " -L#{jemalloc_lib_dir} -ljemalloc #{odgi_lib_path}"
+  $LDFLAGS << if RUBY_PLATFORM =~ /darwin/
+                " -Wl,-rpath,#{jemalloc_lib_dir}"
+              else
+                " -Wl,-rpath,#{jemalloc_lib_dir}"
+              end
 else
   $LDFLAGS << " -L#{jemalloc_lib_dir} -ljemalloc"
-  $LDFLAGS << " -Wl,-rpath,#{jemalloc_lib_dir}:#{odgi_library_dir}"
+  $LDFLAGS << if RUBY_PLATFORM =~ /darwin/
+                " -Wl,-rpath,#{jemalloc_lib_dir}:#{odgi_library_dir}"
+              else
+                " -Wl,-rpath,#{jemalloc_lib_dir}:#{odgi_library_dir}"
+              end
   find_library('odgi', nil, odgi_library_dir)
 end
 

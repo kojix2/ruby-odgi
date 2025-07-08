@@ -25,7 +25,7 @@ file jemalloc_vendor_lib do
   # Build jemalloc
   Dir.chdir('jemalloc') do
     sh './autogen.sh'
-    sh 'CFLAGS="-fPIC" ./configure --disable-initial-exec-tls'
+    sh 'CFLAGS="-fPIC" ./configure --disable-initial-exec-tls --enable-override'
     sh "make -j #{Etc.nprocessors}"
   end
 
@@ -240,7 +240,13 @@ file odgi_vendor_lib => [jemalloc_vendor_lib] do
     # Set rpath to use $ORIGIN for relative path resolution and override JEMALLOC_LINK_LIBRARIES
     rpath_setting = "'$ORIGIN'"
     openmp_include = ENV['HOMEBREW_PREFIX'] ? "#{ENV['HOMEBREW_PREFIX']}/opt/libomp/include" : '/opt/homebrew/opt/libomp/include'
-    cmake_cxx_flags = "-I#{openmp_include} -Wno-error=missing-template-arg-list-after-template-kw"
+
+    # Only add Clang-specific flags on macOS (where Clang is typically used)
+    cmake_cxx_flags = if RUBY_PLATFORM =~ /darwin/
+                        "-I#{openmp_include} -Wno-error=missing-template-arg-list-after-template-kw"
+                      else
+                        "-I#{openmp_include}"
+                      end
     cmake_c_flags = "-I#{openmp_include}"
     sh "cmake -H. -Bbuild -DJEMALLOC_LIBRARY=#{jemalloc_lib_file} -DJEMALLOC_INCLUDE_DIR=#{jemalloc_include_dir} -DJEMALLOC_LINK_LIBRARIES=#{jemalloc_lib_file} -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON -DCMAKE_INSTALL_RPATH=#{rpath_setting} -DCMAKE_BUILD_RPATH=#{rpath_setting} -DCMAKE_CXX_FLAGS='#{cmake_cxx_flags}' -DCMAKE_C_FLAGS='#{cmake_c_flags}'"
 
@@ -252,6 +258,15 @@ file odgi_vendor_lib => [jemalloc_vendor_lib] do
 
   # Move to vendor directory
   FileUtils.cp(odgi_source_lib, odgi_vendor_lib)
+
+  # Fix library paths on macOS
+  if RUBY_PLATFORM =~ /darwin/
+    # Fix jemalloc path in libodgi.dylib
+    sh "install_name_tool -change /opt/homebrew/opt/jemalloc/lib/libjemalloc.2.dylib @rpath/libjemalloc.2.dylib #{odgi_vendor_lib}",
+       verbose: false
+    puts "Fixed jemalloc library path in #{odgi_vendor_lib}"
+  end
+
   puts "Moved odgi library to vendor: #{odgi_vendor_lib}"
 end
 
@@ -310,7 +325,22 @@ Rake::ExtensionTask.new('odgi') do |ext|
   ext.config_options << "--with-jemalloc-lib=#{VENDOR_LIB_DIR}"
 end
 
-# Update compile task to depend on vendor libraries
-task compile: [odgi_vendor_lib, jemalloc_vendor_lib]
+# Fix library paths on macOS after compilation
+task :fix_library_paths do
+  if RUBY_PLATFORM =~ /darwin/
+    bundle_path = 'lib/odgi/odgi.bundle'
+    if File.exist?(bundle_path)
+      # Fix jemalloc path
+      sh "install_name_tool -change /usr/local/lib/libjemalloc.2.dylib @rpath/libjemalloc.2.dylib #{bundle_path}",
+         verbose: false
+      puts "Fixed jemalloc library path in #{bundle_path}"
+    end
+  end
+end
+
+# Update compile task to depend on vendor libraries and fix paths
+task compile: [odgi_vendor_lib, jemalloc_vendor_lib] do
+  Rake::Task[:fix_library_paths].invoke
+end
 task build: :compile
 task test: :compile
